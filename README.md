@@ -17,14 +17,13 @@ This is WIP and might not be the most optimal way to do this.
 
 To initialize a `ZType` instance, use the `init` function. The function takes an allocator and a value of any supported type.
 
-
+```zig
 const std = @import("std");
 const ZType = @import("path/to/ztype.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
-
     const zbool = try ZType.init(allocator, true);
     const zint = try ZType.init(allocator, 42);
     const zfloat = try ZType.init(allocator, 3.14);
@@ -35,7 +34,7 @@ pub fn main() !void {
     zfloat.deinit(allocator);
     zarray.deinit(allocator);
 }
-
+```
 
 ### Deinitialization
 
@@ -65,17 +64,15 @@ const value = try ztype.getInt();
 
 Here is a complete example demonstrating the usage of the `ZType` library:
 
-
+```zig
 const std = @import("std");
 const ZType = @import("path/to/ztype.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
-
     const zbool = try ZType.init(allocator, true);
     defer zbool.deinit(allocator);
-
     const zint = try ZType.init(allocator, 42);
     defer zint.deinit(allocator);
 
@@ -95,4 +92,4 @@ pub fn main() !void {
     std.debug.print("Float: {}\n", .{float_value});
     std.debug.print("Array: {}\n", .{array_value});
 }
-
+```
