@@ -27,7 +27,9 @@ pub fn main() !void {
     const zbool = try ZType.init(allocator, true);
     const zint = try ZType.init(allocator, 42);
     const zfloat = try ZType.init(allocator, 3.14);
-    const zarray = try ZType.init(allocator, &[_]ZType{zbool, zint, zfloat});
+    // TODO: needs to be fixed
+    const list_of_elems: [3]ZType = .{zbool, zint, zfloat}
+    const zarray = try ZType.init(allocator, list_of_elems);
     // Deinitialize when done
     zbool.deinit(allocator);
     zint.deinit(allocator);
@@ -79,7 +81,8 @@ pub fn main() !void {
     const zfloat = try ZType.init(allocator, 3.14);
     defer zfloat.deinit(allocator);
 
-    const zarray = try ZType.init(allocator, &[_]ZType{zbool, zint, zfloat});
+    const list_of_elems: [3]ZType = .{zbool, zint, zfloat}
+    const zarray = try ZType.init(allocator, list_of_elems);
     defer zarray.deinit(allocator);
 
     const bool_value = try zbool.getBool();
