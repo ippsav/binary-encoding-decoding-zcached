@@ -1,4 +1,4 @@
-# ZType Serialization Library
+# ZType Binary Serialization/Deserialization
 
 ## Overview
 
