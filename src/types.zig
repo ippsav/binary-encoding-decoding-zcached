@@ -3,18 +3,16 @@ const std = @import("std");
 fn bytesNeeded(comptime T: type, value: T) u8 {
     return switch (@typeInfo(T)) {
         .Int => |info| {
-            const U = std.meta.Int(.unsigned, info.bits);
-            const x = if (info.signedness == .unsigned) value else @as(U, @intCast(@abs(value)));
-            const bits = std.math.log2_int_ceil(U, x);
-            return @intCast((bits + 8) / 8);
+            if (info.signedness == .signed and value < 0) {
+                return @intCast(@sizeOf(i64));
+            } else {
+                const U = std.meta.Int(.unsigned, info.bits);
+                const x = @as(U, @intCast(value));
+                const bits = std.math.log2_int_ceil(U, x);
+                return @intCast((bits + 7) / 8);
+            }
         },
-        .Float => {
-            std.debug.assert(T == f64);
-            const abs_value: f64 = @abs(value);
-            const f32_value: f32 = @floatCast(abs_value);
-
-            if (abs_value == f32_value) return 4 else return 8;
-        },
+        .Float => return @sizeOf(f64),
         else => @compileError("Unsupported type for bytesNeeded"),
     };
 }
@@ -55,33 +53,18 @@ pub const ZType = struct {
             },
             []ZType, []const ZType => {
                 const n_elements = value.len;
-                var total_size: usize = 1;
-                if (n_elements >= 32) {
-                    total_size += 4; // 4 extra bytes for length if n_elements >= 32
-                }
+                const bytes_needed = bytesNeeded(usize, n_elements);
+                var total_size: usize = 1 + bytes_needed; // 1 byte for the tag, usize for length
                 for (value) |elem| {
                     total_size += elem.data.len;
                 }
                 var data = try allocator.alloc(u8, total_size);
                 data[0] = @as(u8, @intFromEnum(Tag.array));
-
-                if (n_elements < 32) {
-                    // If n_elements fits in 5 bits, encode it directly in the first byte
-                    data[0] |= @as(u8, @intCast(n_elements)) << 3;
-                    var offset: usize = 1;
-                    for (value) |elem| {
-                        @memcpy(data[offset..][0..elem.data.len], elem.data);
-                        offset += elem.data.len;
-                    }
-                } else {
-                    // Otherwise, set the 5 bits to all 1s and use 4 bytes for length
-                    data[0] |= 0b11111000;
-                    std.mem.writeInt(u32, data[1..5], @intCast(n_elements), .little);
-                    var offset: usize = 5;
-                    for (value) |elem| {
-                        @memcpy(data[offset..][0..elem.data.len], elem.data);
-                        offset += elem.data.len;
-                    }
+                std.mem.writeInt(usize, data[1 .. 1 + @sizeOf(usize)], n_elements, .little);
+                var offset: usize = 1 + @sizeOf(usize);
+                for (value) |elem| {
+                    @memcpy(data[offset..][0..elem.data.len], elem.data);
+                    offset += elem.data.len;
                 }
                 return ZType{ .data = data };
             },
@@ -133,20 +116,9 @@ pub const ZType = struct {
 
     pub fn getArray(self: ZType, allocator: std.mem.Allocator) ![]ZType {
         if (self.getTag() != .array) return error.TypeMismatch;
-        const first_byte = self.data[0];
-        const encoded_length = (first_byte >> 3) & 0b11111;
-        var n_elements: usize = undefined;
-        var offset: usize = undefined;
-        if (encoded_length == 0b11111) {
-            // Length is stored in the next 4 bytes
-            n_elements = std.mem.readInt(u32, self.data[1..5], .little);
-            offset = 5;
-        } else {
-            // Length is directly encoded in the first byte
-            n_elements = encoded_length;
-            offset = 1;
-        }
+        const n_elements = std.mem.readInt(usize, self.data[1 .. 1 + @sizeOf(usize)], .little);
         var result = try allocator.alloc(ZType, n_elements);
+        var offset: usize = 1 + @sizeOf(usize);
         for (0..n_elements) |i| {
             const elem_tag = @as(Tag, @enumFromInt(self.data[offset] & 0b111));
             const elem_len = switch (elem_tag) {
@@ -180,7 +152,7 @@ pub const ZType = struct {
         if (self.getTag() != .float) return error.TypeMismatch;
         var float_bytes: [@sizeOf(f64)]u8 = undefined;
         const bytes_len: u8 = self.data[0] >> 3;
-        @memcpy(&float_bytes, self.data[1 .. bytes_len + 1]);
+        @memcpy(float_bytes[0..bytes_len], self.data[1 .. bytes_len + 1]);
         return @bitCast(float_bytes);
     }
 
@@ -213,7 +185,6 @@ pub const ZType = struct {
                     }
                     break :blk len;
                 },
-                else => unreachable,
             };
             const value = ZType{ .data = self.data[offset..][0..value_len] };
             try result.put(try allocator.dupe(u8, key), value);
