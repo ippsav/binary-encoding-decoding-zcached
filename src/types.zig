@@ -45,14 +45,10 @@ pub const Tag = enum(u4) {
     float,
     str,
     array,
-    map,
-    null,
-};
-
-pub const ArrayMetadata = enum(u2) {
-    array,
     set,
     uset,
+    map,
+    null,
 };
 
 pub const ZBucket = []const u8;
@@ -112,7 +108,7 @@ pub const ZWriter = struct {
 
         const size_bytes = std.mem.asBytes(&n_elements);
 
-        _ = try zw.writer.writeByte(@intFromEnum(Tag.array) | @as(u8, @intFromEnum(length_size_enum)) << 4 | @as(u8, @intFromEnum(ArrayMetadata.uset)) << 6);
+        _ = try zw.writer.writeByte(@intFromEnum(Tag.array) | @as(u8, @intFromEnum(length_size_enum)) << 4);
         _ = try zw.writer.write(size_bytes[0..length_size]);
 
         var it = s.iterator();
@@ -131,7 +127,7 @@ pub const ZWriter = struct {
 
         const size_bytes = std.mem.asBytes(&n_elements);
 
-        _ = try zw.writer.writeByte(@intFromEnum(Tag.array) | @as(u8, @intFromEnum(length_size_enum)) << 4 | @as(u8, @intFromEnum(ArrayMetadata.set)) << 6);
+        _ = try zw.writer.writeByte(@intFromEnum(Tag.array) | @as(u8, @intFromEnum(length_size_enum)) << 4);
         _ = try zw.writer.write(size_bytes[0..length_size]);
 
         var it = s.iterator();
@@ -150,7 +146,7 @@ pub const ZWriter = struct {
 
         const size_bytes = std.mem.asBytes(&n_elements);
 
-        _ = try zw.writer.writeByte(@intFromEnum(Tag.array) | @as(u8, @intFromEnum(length_size_enum)) << 4 | @as(u8, @intFromEnum(ArrayMetadata.array)) << 6);
+        _ = try zw.writer.writeByte(@intFromEnum(Tag.array) | @as(u8, @intFromEnum(length_size_enum)) << 4);
         _ = try zw.writer.write(size_bytes[0..length_size]);
 
         for (arr) |elem| {
@@ -274,51 +270,57 @@ pub const ZReader = struct {
                 const length_size_enum: LengthSize = @enumFromInt(@as(u8, byte >> 4));
                 const length_size = length_size_enum.size();
 
-                const array_metadata: ArrayMetadata = @enumFromInt(@as(u8, byte >> 6));
+                const n_elements = try zr.reader.readVarInt(usize, .little, length_size);
+                size += length_size;
+                var arr = try std.ArrayList(ZType).initCapacity(allocator, n_elements);
+
+                for (0..n_elements) |_| {
+                    var elem: ZType = undefined;
+                    size += try zr.read(&elem, allocator);
+                    try arr.append(elem);
+                }
+
+                out.* = .{
+                    .array = arr,
+                };
+            },
+            .uset => {
+                const length_size_enum: LengthSize = @enumFromInt(@as(u8, byte >> 4));
+                const length_size = length_size_enum.size();
 
                 const n_elements = try zr.reader.readVarInt(usize, .little, length_size);
                 size += length_size;
-                switch (array_metadata) {
-                    .array => {
-                        var arr = try std.ArrayList(ZType).initCapacity(allocator, n_elements);
 
-                        for (0..n_elements) |_| {
-                            var elem: ZType = undefined;
-                            size += try zr.read(&elem, allocator);
-                            try arr.append(elem);
-                        }
+                var uset = sets.SetUnordered(ZType).init(allocator);
 
-                        out.* = .{
-                            .array = arr,
-                        };
-                    },
-                    .set => {
-                        var set = sets.Set(ZType).init(allocator);
-
-                        for (0..n_elements) |_| {
-                            var elem: ZType = undefined;
-                            size += try zr.read(&elem, allocator);
-                            try set.insert(elem);
-                        }
-
-                        out.* = .{
-                            .set = set,
-                        };
-                    },
-                    .uset => {
-                        var uset = sets.SetUnordered(ZType).init(allocator);
-
-                        for (0..n_elements) |_| {
-                            var elem: ZType = undefined;
-                            size += try zr.read(&elem, allocator);
-                            try uset.insert(elem);
-                        }
-
-                        out.* = .{
-                            .uset = uset,
-                        };
-                    },
+                for (0..n_elements) |_| {
+                    var elem: ZType = undefined;
+                    size += try zr.read(&elem, allocator);
+                    try uset.insert(elem);
                 }
+
+                out.* = .{
+                    .uset = uset,
+                };
+            },
+            .set => {
+                const length_size_enum: LengthSize = @enumFromInt(@as(u8, byte >> 4));
+                const length_size = length_size_enum.size();
+
+                const n_elements = try zr.reader.readVarInt(usize, .little, length_size);
+                size += length_size;
+
+                var set = sets.Set(ZType).init(allocator);
+
+                for (0..n_elements) |_| {
+                    var elem: ZType = undefined;
+                    size += try zr.read(&elem, allocator);
+                    try set.insert(elem);
+                }
+
+                out.* = .{
+                    .set = set,
+                };
             },
             .map => {
                 const length_size_enum: LengthSize = @enumFromInt(@as(u8, byte >> 4));
@@ -329,9 +331,6 @@ pub const ZReader = struct {
                 var map = std.StringHashMap(ZType).init(allocator);
 
                 for (0..n_elements) |_| {
-                    // var elem: ZType = undefined;
-                    // size += try zr.read(&elem, allocator);
-                    // try arr.append(elem);
                     var key: ZType = undefined;
                     var value: ZType = undefined;
                     size += try zr.read(&key, allocator);
